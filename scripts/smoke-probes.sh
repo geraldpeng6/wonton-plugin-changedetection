@@ -18,7 +18,7 @@ web_assert() { grep -qiE 'new-watch-form|add-watch-url-row'; }   # 标准输入�
 data_write() {
   local ts body
   ts="$(date +%s)"
-  if ! body="$(web_get /form/add --data-urlencode "url=https://example.com/?wonton-smoke-$ts" -L 2>&1)"; then
+  if ! body="$(web_get /form/add/quickwatch --data-urlencode "url=https://example.com/?wonton-smoke-$ts" -L 2>&1)"; then
     echo "data_write：POST /form/add 失败：$(head -c 200 <<<"$body")"
     return 1
   fi
