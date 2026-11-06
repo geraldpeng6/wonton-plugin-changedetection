@@ -14,12 +14,19 @@ E2E_NOTE="$SMOKE_NOTE"
 web_assert() { grep -qiE 'new-watch-form|add-watch-url-row'; }   # 标准输入：watch 总览页
 
 # data_write：经表单建 watch，URL 带唯一标记并覆盖写进 SMOKE_STATE。
-# 应用首查后会把标题换成网页标题，但 URL 原样渲染在总览页的 favicon 链接（open_link）里。
+# 应用全局开 CSRFProtect：先从总览页拿 csrf_token；首查后标题会换成网页标题，
+# 但 URL 原样渲染在总览页的 favicon 链接（open_link）里，data_check 靠它断言。
 data_write() {
-  local ts body
+  local ts tok page body
   ts="$(date +%s)"
-  if ! body="$(web_get /form/add/quickwatch --data-urlencode "url=https://example.com/?wonton-smoke-$ts" -L 2>&1)"; then
-    echo "data_write：POST /form/add 失败：$(head -c 200 <<<"$body")"
+  if ! page="$(web_get / 2>&1)"; then
+    echo "data_write：拿不到总览页：$(head -c 200 <<<"$page")"
+    return 1
+  fi
+  tok="$(sed -n 's/.*name="csrf_token" value="\([^"]*\)".*/\1/p' <<<"$page" | head -1)"
+  [[ -n "$tok" ]] || { echo "data_write：总览页里没有 csrf_token"; return 1; }
+  if ! body="$(web_get /form/add/quickwatch --data-urlencode "csrf_token=$tok" --data-urlencode "url=https://example.com/?wonton-smoke-$ts" -L 2>&1)"; then
+    echo "data_write：POST /form/add/quickwatch 失败：$(head -c 200 <<<"$body")"
     return 1
   fi
   printf '%s' "$ts" >"$SMOKE_STATE"
