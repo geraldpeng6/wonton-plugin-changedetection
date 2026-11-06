@@ -3,9 +3,11 @@
 # changedetection.io 没有用户体系：上游默认无访问口令，网页只经云吞网关进来，身份由网关会话把守。
 # 数据探针经应用自己的 REST API 写一条 watch，升级、重装后断言它还在。
 
+# shellcheck disable=SC2034  # 由开发套件 probes.sh 与 e2e/smoke.sh source 后读取
 IDENTITY_NA=1
-# shellcheck disable=SC2034  # SMOKE_NOTE 由开发套件 probes.sh 读，E2E_NOTE 由 e2e/smoke.sh 读
+# shellcheck disable=SC2034  # 同上：SMOKE_NOTE 给 probes.sh，E2E_NOTE 给 e2e/smoke.sh
 SMOKE_NOTE="应用没有用户体系，也没有应用登录（上游默认无口令）：能打开网页就只有网关认过的主人，身份以网页特征命中为证"
+# shellcheck disable=SC2034  # 同上
 E2E_NOTE="$SMOKE_NOTE"
 
 # 清单里的插件 id（x-wonton.id，安装后不能改）；e2e 在安装后导出过，优先用它。
