@@ -7,16 +7,30 @@ IDENTITY_NA=1
 SMOKE_NOTE="应用没有用户体系，也没有应用登录（上游默认无口令）：能打开网页就只有网关认过的主人，身份以网页特征命中为证"
 E2E_NOTE="$SMOKE_NOTE"
 
-# 清单里的插件 id（x-wonton.id，安装后不能改）。
-plugin_id() { sed -n 's/^  id: //p' "${E2E_DIR:-$SMOKE_DIR}/docker-compose.yml" | head -1; }
+# 清单里的插件 id（x-wonton.id，安装后不能改）；e2e 在安装后导出过，优先用它。
+plugin_id() {
+  if [[ -n "${E2E_NAME_ID:-}" ]]; then printf '%s\n' "$E2E_NAME_ID"; return 0; fi
+  sed -n 's/^  id: //p' "${E2E_DIR:-$SMOKE_DIR}/docker-compose.yml" | head -1
+}
 
-# 经核心 API 拿本插件的网页地址（去掉路径）：data_write 在 e2e 导出 E2E_WEB_URL 之前就要用。
+# 本插件的网页地址（去掉路径）。升级分支的 data_write 跑在 e2e 导出 E2E_WEB_URL 之前，
+# 那时经核心 API 自己查；查不出时把各步细节打到 stderr（进冒烟日志），不再静默吞。
 plugin_web() {
+  if [[ -n "${E2E_WEB_URL:-}" ]]; then printf '%s\n' "${E2E_WEB_URL%%/}"; return 0; fi
   local plugins url
-  plugins="$(e2e_api GET /_wonton/api/plugins 2>/dev/null)" || return 1
-  url="$(jq -r --arg id "$(plugin_id)" --arg json "$plugins" \
-    '$json | fromjson | .plugins[] | select(.id==$id) | .web_url // ""' 2>/dev/null)" || return 1
-  [[ -n "$url" ]] || return 1
+  if ! plugins="$(e2e_api GET /_wonton/api/plugins 2>&1)"; then
+    echo "plugin_web：核心 API 列插件失败：$(head -c 200 <<<"$plugins")" >&2
+    return 1
+  fi
+  if ! url="$(jq -r --arg id "$(plugin_id)" --arg json "$plugins" \
+    '$json | fromjson | .plugins[] | select(.id==$id) | .web_url // ""' 2>&1)"; then
+    echo "plugin_web：解析插件列表失败：$(head -c 200 <<<"$url")" >&2
+    return 1
+  fi
+  if [[ -z "$url" ]]; then
+    echo "plugin_web：插件列表里没有 $(plugin_id) 的 web_url" >&2
+    return 1
+  fi
   sed -E 's#^(https?://[^/]+).*#\1#' <<<"$url"
 }
 
