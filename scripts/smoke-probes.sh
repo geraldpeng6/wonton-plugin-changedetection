@@ -48,13 +48,17 @@ api_token() {
   python3 -c "import json;print(json.load(open('$f'))['settings']['application']['api_access_token'])" 2>/dev/null
 }
 
-# URL 只是记录，探针不要求真的抓到（有没有网都验证的是数据本身）。
+# URL 只是记录，探针不要求真的抓到（有没有外网都验证的是数据本身）。
+# 经网关的请求都要带核心会话 cookie（e2e 是 E2E_JAR，开发套件是 SMOKE_JAR），否则网关按未登录 401。
+probe_jar() { printf '%s' "${E2E_JAR:-$SMOKE_JAR}"; }
+
 data_write() {
-  local web uuid token body dir
+  local web uuid token body dir jar
   dir="$(printf '%s/.wonton/data/apps/%s' "${E2E_DIR:-$SMOKE_DIR}" "$(plugin_id | tr . -)")"
   web="$(plugin_web)" || { echo "拿不到插件网页地址"; return 1; }
   token="$(api_token "$dir")" || { echo "读不到 API 令牌（$dir/changedetection.json）"; return 1; }
-  body="$(curl -sS --noproxy '*' --fail-with-body -H 'Content-Type: application/json' -H "X-API-KEY: $token" \
+  jar="$(probe_jar)"
+  body="$(curl -sS --noproxy '*' --fail-with-body -b "$jar" -H 'Content-Type: application/json' -H "X-API-KEY: $token" \
     -d "{\"url\":\"https://example.com/\",\"title\":\"wonton-smoke-$(date +%s)\"}" \
     "$web/api/v1/watch")" || { echo "建 watch 失败：$body"; return 1; }
   uuid="$(jq -r '.uuid // empty' <<<"$body")"
@@ -63,13 +67,14 @@ data_write() {
 }
 
 data_check() {
-  local web uuid token title dir
+  local web uuid token title dir jar
   dir="$(printf '%s/.wonton/data/apps/%s' "${E2E_DIR:-$SMOKE_DIR}" "$(plugin_id | tr . -)")"
   uuid="$(cat "$(probe_uuid_file)" 2>/dev/null)"
   [[ -n "$uuid" ]] || { echo "找不到 data_write 写下的 watch uuid"; return 1; }
   web="$(plugin_web)" || { echo "拿不到插件网页地址"; return 1; }
   token="$(api_token "$dir")" || { echo "读不到 API 令牌（$dir/changedetection.json）"; return 1; }
-  title="$(curl -sS --noproxy '*' --fail-with-body -H "X-API-KEY: $token" "$web/api/v1/watch/$uuid" 2>/dev/null | jq -r '.title // empty')" ||
+  jar="$(probe_jar)"
+  title="$(curl -sS --noproxy '*' --fail-with-body -b "$jar" -H "X-API-KEY: $token" "$web/api/v1/watch/$uuid" 2>/dev/null | jq -r '.title // empty')" ||
     { echo "watch $uuid 查不到（升级或重装后丢了）"; return 1; }
   grep -q '^wonton-smoke-' <<<"$title" || { echo "watch $uuid 的标题对不上：$title"; return 1; }
 }
