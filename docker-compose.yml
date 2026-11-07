@@ -40,7 +40,7 @@ services:
       start_interval: 2s
 
 x-wonton:
-  spec: "0.5"
+  spec: "0.6"
   id: io.changedetection
   version: 0.1.0
   kind: app
