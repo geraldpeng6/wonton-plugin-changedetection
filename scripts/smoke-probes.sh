@@ -159,15 +159,19 @@ extra_check() { # 内部邮箱端到端：一次性初始化设好的全局邮�
   page="$(web_get /)" || { echo "拿不到总览页：$(head -c 200 <<<"$page")"; return 1; }
   tok="$(sed -n 's/.*name="csrf_token" value="\([^"]*\)".*/\1/p' <<<"$page" | head -1)"
   [[ -n "$tok" ]] || { echo "总览页里没有 csrf_token"; return 1; }
-  # send-test 要求至少有一个 watch（没有就先建一个），然后按全局通知列表发一封真实测试信
+  # send-test 要求至少有一个 watch（没有就先建一个）；global-settings 模式下通知 URL 要放在表单里
+  #（端点不读存储的全局列表），mail-init 的标记文件里存的就是设好的 mailto:// URL
+  local mailurl reply
+  mailurl="$(docker exec "$appc" cat /datastore/.wonton-mail-configured)" ||
+    { echo "读不到 mail-init 设的通知 URL（标记文件）"; return 1; }
   marker="wonton-mail-$(date +%s)"
   web_get /form/add/quickwatch --data-urlencode "csrf_token=$tok" \
     --data-urlencode "url=https://example.com/?$marker" -L -o /dev/null ||
     { echo "建 watch 失败"; return 1; }
-  rc="$(web_get "/notification/send-test?mode=global-settings" --data-urlencode "csrf_token=$tok" -o /dev/null -w '%{http_code}')" ||
-    { echo "POST /notification/send-test 失败"; return 1; }
-  [[ "$rc" == 200 || "$rc" == 302* || "$rc" == 303* ]] ||
-    { echo "测试通知没发出去（HTTP $rc）"; return 1; }
+  reply="$(web_get "/notification/send-test?mode=global-settings" --data-urlencode "csrf_token=$tok" \
+    --data-urlencode "notification_urls=$mailurl" 2>&1)" || { echo "POST /notification/send-test 失败：$reply"; return 1; }
+  grep -q "OK - Sent test notifications" <<<"$reply" ||
+    { echo "测试通知没发出去，端点回了：$(head -c 200 <<<"$reply")"; return 1; }
   if ! mail="$(_mx_wait_mail io.changedetection)"; then
     echo "60 秒内没在主人的 Wonton 私聊看到 changedetection 的告警测试信；内部邮箱现在：$(_mp_api '/api/v1/messages?limit=10' 2>/dev/null | jq -c '[.messages[] | {to: [.To[].Address], subject}]' 2>/dev/null | head -c 300)"
     echo "房间读取原始输出：$(_mx_room_mail io.changedetection 2>&1 | head -c 400)"
