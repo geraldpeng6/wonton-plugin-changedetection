@@ -6,7 +6,7 @@
 
 应用发的信会出现在你的 Wonton 私聊里：装好时已把全局邮件通知配到云吞的内部邮箱，监控到变化就发信提醒；设置页的"添加邮件通知"也预填了内部服务器，填个地址就能加收件人。发往外部邮箱（家人以外、Kindle 这类）的信会被拒收，应用会报发送失败。要换渠道或改内容，在应用的"设置 → 通知"里改，插件不会改回来。
 
-开发流程见[插件开发指南](https://github.com/geraldpeng6/wonton-docs/blob/main/develop.md)，清单规则见[插件规范](https://github.com/geraldpeng6/wonton-docs/blob/main/plugin-spec.md)。
+开发流程见[插件开发指南](https://github.com/wontonapp/wonton-docs/blob/main/develop.md)，清单规则见[插件规范](https://github.com/wontonapp/wonton-docs/blob/main/plugin-spec.md)。
 
 ## 图标
 
