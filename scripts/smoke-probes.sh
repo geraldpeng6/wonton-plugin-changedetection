@@ -13,11 +13,22 @@ E2E_NOTE="$SMOKE_NOTE"
 
 web_assert() { grep -qiE 'new-watch-form|add-watch-url-row'; }   # 标准输入：watch 总览页
 
+# 核心会话：数据钩子和邮件检查跑的时候套件的会话可能还没建或已失效（网关对插件路径一律 401），
+# 照 audiobookshelf/bookstack 探针的做法自己登一次。
+cd_session() {
+  local base="${E2E_BASE:-${SMOKE_BASE:-}}" token="${E2E_TOKEN:-${SMOKE_TOKEN:-}}"
+  [[ -n "$base" && -n "$token" && -n "${SMOKE_JAR:-}" ]] || { echo "没有核心地址、主人令牌或 jar"; return 1; }
+  curl -sS --noproxy '*' -o /dev/null -b "$SMOKE_JAR" -c "$SMOKE_JAR" \
+    --data-urlencode "token=$token" "$base/_wonton/login" ||
+    { echo "核心会话登录不了"; return 1; }
+}
+
 # data_write：经表单建 watch，URL 带唯一标记并覆盖写进 SMOKE_STATE。
 # 应用全局开 CSRFProtect：先从总览页拿 csrf_token；首查后标题会换成网页标题，
 # 但 URL 原样渲染在总览页的 favicon 链接（open_link）里，data_check 靠它断言。
 data_write() {
   local ts tok page body
+  cd_session || return 1
   ts="$(date +%s)"
   if ! page="$(web_get / 2>&1)"; then
     echo "data_write：拿不到总览页：$(head -c 200 <<<"$page")"
@@ -35,6 +46,7 @@ data_write() {
 
 data_check() {
   local ts page
+  cd_session || return 1
   ts="$(cat "$SMOKE_STATE" 2>/dev/null)"
   [[ -n "$ts" ]] || { echo "data_check：SMOKE_STATE 里没有 data_write 写的标记"; return 1; }
   if ! page="$(web_get / 2>&1)"; then
@@ -126,8 +138,9 @@ _owner_email() { # 主人资料里的内部邮箱（全局通知 URL 的收件�
   jq -er '.email // empty' <<<"$me" || { echo "主人资料里没有邮箱：$me"; return 1; }
 }
 
-extra_check() { # 内部邮箱端到端：一次性初始化设好的全局邮件通知真发信，信进 Mailpit、核心投进主人私聊后删掉
+extra_check() { # 内部邮箱端到端：一次性初始化设好的全局邮件通知真发信，核心投进主人私聊的私聊里断言
   local appc mailinit marker to page tok rc
+  cd_session || return 1
   appc="$(docker ps --format '{{.Names}}' | grep -E -- "-changedetection--changedetection$|changedetection-changedetection-1$" | head -1)"
   [[ -n "$appc" ]] || { echo "找不到 changedetection 应用容器"; return 1; }
   mailinit="$(docker ps -a --format '{{.Names}}' | grep -E -- "-changedetection--mail-init$|changedetection-mail-init-1$" | head -1)"
