@@ -169,6 +169,6 @@ extra_check() { # 内部邮箱端到端：一次性初始化设好的全局邮�
   [[ "$rc" == 200 || "$rc" == 302* || "$rc" == 303* ]] ||
     { echo "测试通知没发出去（HTTP $rc）"; return 1; }
   _mx_wait_mail io.changedetection ||
-    { echo "60 秒内没在主人的 Wonton 私聊看到 changedetection 的告警测试信（收件人 $to）"; return 1; }
+    { echo "60 秒内没在主人的 Wonton 私聊看到 changedetection 的告警测试信；内部邮箱现在：$(_mp_api '/api/v1/messages?limit=10' 2>/dev/null | jq -c '[.messages[] | {to: [.To[].Address], subject}]' 2>/dev/null | head -c 300)；主人通知房间文件：$(docker exec "wonton-${SMOKE_INSTANCE:?}--core" sh -c 'ls "$WONTON_DATA_DIR/core/" | grep notice-room' 2>/dev/null)"; return 1; }
   echo "告警测试信已投进 $to 的 Wonton 私聊"
 }
