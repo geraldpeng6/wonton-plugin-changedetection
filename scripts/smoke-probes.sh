@@ -44,3 +44,75 @@ data_check() {
   grep -q "wonton-smoke-$ts" <<<"$page" ||
     { echo "data_check：总览页里没有 wonton-smoke-$ts（watch 丢了）"; return 1; }
 }
+
+# ---------- 内部邮箱（notify）的端到端检查 ----------
+
+_mp_api() { # <路径>：调 Mailpit 的 HTTP API（basic core:<api-password>）。Mailpit 只挂在插件网络，
+  # 宿主够不着；照核心自己 smoke-mailbox 的做法，在核心容器的网络栈里起一次性 curl 访问它。
+  local core pw dd out
+  core="wonton-${SMOKE_INSTANCE:?}--core"
+  docker inspect "$core" >/dev/null 2>&1 || { echo "找不到核心容器 $core"; return 1; }
+  if declare -F read_env >/dev/null; then dd="$(read_env WONTON_DATA_DIR)"
+  elif declare -F probes_setting >/dev/null; then dd="$(probes_setting WONTON_DATA_DIR)"
+  else echo "读不到 WONTON_DATA_DIR（read_env / probes_setting 都没有）"; return 1; fi
+  pw="$(docker exec "$core" cat "$dd/core/mailpit/api-password" 2>/dev/null)"
+  [[ -n "$pw" ]] || { echo "读不到 Mailpit API 密码（核心数据目录 core/mailpit/api-password）"; return 1; }
+  out="$(docker run --rm --network "container:$core" curlimages/curl:8.23.0 \
+    -s -u "core:$pw" "http://mailpit.wonton.internal:8025$1" 2>&1)"
+  if [[ "$out" == "{"* ]]; then printf '%s' "$out"; return 0; fi
+  echo "Mailpit 没给出 JSON：$(head -c 200 <<<"$out")"
+  return 1
+}
+
+_mp_wait() { # <jq 过滤> [轮数=20]：轮询 Mailpit 信箱直到过滤命中
+  local filt="$1" n="${2:-20}" i out
+  for ((i = 0; i < n; i++)); do
+    out="$(_mp_api "/api/v1/messages?limit=100")" || { sleep 3; continue; }
+    jq -e "$filt" <<<"$out" >/dev/null 2>&1 && return 0
+    sleep 3
+  done
+  return 1
+}
+
+_owner_email() { # 主人资料里的内部邮箱（全局通知 URL 的收件人，不猜域名）
+  local base token me
+  base="${E2E_BASE:-${SMOKE_BASE:-}}"; token="${E2E_TOKEN:-${SMOKE_TOKEN:-}}"
+  [[ -n "$base" && -n "$token" ]] || { echo "没有核心地址或主人令牌"; return 1; }
+  me="$(curl -sS --noproxy '*' --fail-with-body -H "Authorization: Bearer $token" "$base/_wonton/api/me")" ||
+    { echo "读不到主人资料（/_wonton/api/me）"; return 1; }
+  jq -er '.email // empty' <<<"$me" || { echo "主人资料里没有邮箱：$me"; return 1; }
+}
+
+extra_check() { # 内部邮箱端到端：一次性初始化设好的全局邮件通知真发信，信进 Mailpit、核心投进主人私聊后删掉
+  local appc mailinit marker to page tok rc
+  appc="$(docker ps --format '{{.Names}}' | grep -E -- "-changedetection--changedetection$|changedetection-changedetection-1$" | head -1)"
+  [[ -n "$appc" ]] || { echo "找不到 changedetection 应用容器"; return 1; }
+  mailinit="$(docker ps -a --format '{{.Names}}' | grep -E -- "-changedetection--mail-init$|changedetection-mail-init-1$" | head -1)"
+  [[ -n "$mailinit" ]] || { echo "找不到 mail-init 一次性容器"; return 1; }
+  # 一次性初始化的结论在它自己的日志里（标记文件在应用的数据卷里）
+  docker logs "$mailinit" 2>&1 | grep -q "全局邮件通知已设为 mailto://" ||
+    { echo "mail-init 日志里没有设好的通知 URL：$(docker logs "$mailinit" 2>&1 | tail -2)"; return 1; }
+  docker exec "$appc" sh -c 'test -f /datastore/.wonton-mail-configured' ||
+    { echo "datastore 里没有 .wonton-mail-configured 标记"; return 1; }
+  echo "mail-init 已把全局邮件通知设到核心内部邮箱"
+
+  to="$(_owner_email)" || { echo "$to"; return 1; }
+  page="$(web_get /)" || { echo "拿不到总览页：$(head -c 200 <<<"$page")"; return 1; }
+  tok="$(sed -n 's/.*name="csrf_token" value="\([^"]*\)".*/\1/p' <<<"$page" | head -1)"
+  [[ -n "$tok" ]] || { echo "总览页里没有 csrf_token"; return 1; }
+  # send-test 要求至少有一个 watch（没有就先建一个），然后按全局通知列表发一封真实测试信
+  marker="wonton-mail-$(date +%s)"
+  web_get /form/add/quickwatch --data-urlencode "csrf_token=$tok" \
+    --data-urlencode "url=https://example.com/?$marker" -L -o /dev/null ||
+    { echo "建 watch 失败"; return 1; }
+  rc="$(web_get "/notification/send-test?mode=global-settings" --data-urlencode "csrf_token=$tok" -o /dev/null -w '%{http_code}')" ||
+    { echo "POST /notification/send-test 失败"; return 1; }
+  [[ "$rc" == 200 || "$rc" == 302* || "$rc" == 303* ]] ||
+    { echo "测试通知没发出去（HTTP $rc）"; return 1; }
+  _mp_wait --arg to "$to" '.messages | any(.To[].Address == $to)' ||
+    { echo "60 秒内没在内部邮箱看到收件人 $to 的告警测试信"; return 1; }
+  echo "测试信已进内部邮箱（收件人 $to）"
+  _mp_wait --arg to "$to" '(.messages | map(select(.To[].Address == $to)) | length) == 0' ||
+    { echo "信一直留在 Mailpit：核心没把它投进收件人的 Wonton 私聊（投完才会删）"; return 1; }
+  echo "核心已把告警测试信投进 $to 的 Wonton 私聊"
+}
