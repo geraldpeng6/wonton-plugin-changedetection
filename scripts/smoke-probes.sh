@@ -21,6 +21,9 @@ cd_session() {
   curl -sS --noproxy '*' -o /dev/null -b "$SMOKE_JAR" -c "$SMOKE_JAR" \
     --data-urlencode "token=$token" "$base/_wonton/login" ||
     { echo "核心会话登录不了"; return 1; }
+  # 插件网页的应用会话要经网关的 SSO 跳转链兑换（_wonton/session），curl -L 自动走完
+  curl -sS --noproxy '*' -o /dev/null -L -b "$SMOKE_JAR" -c "$SMOKE_JAR" -H 'Accept: text/html' \
+    "${SMOKE_WEB_URL%/}/" || { echo "走不通插件网页的登录跳转"; return 1; }
 }
 
 # data_write：经表单建 watch，URL 带唯一标记并覆盖写进 SMOKE_STATE。
