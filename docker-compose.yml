@@ -73,8 +73,8 @@ x-wonton:
   id: io.changedetection
   version: 0.1.1
   kind: app
-  title: { en: changedetection.io }
-  description: { zh: 盯着网页的变化，变了就提醒你, en: Watch web pages for changes and get alerted }
+  title: { zh: 网页变化提醒（changedetection.io）, en: Web Page Change Alerts (changedetection.io) }
+  description: { zh: 给在意的网页定个闹钟：降价、补货、新公告，它定时去看，页面一变就提醒你。, en: "Set an alarm on any web page — price drops, restocks, new announcements: it checks on a schedule and tells you as soon as the page changes." }
   icon: icon.png
   notices: [NOTICE]
   screenshots: [screenshots/watch-list.png, screenshots/edit.png, screenshots/diff.png, screenshots/settings.png]
